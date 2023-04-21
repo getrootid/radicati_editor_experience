@@ -1,0 +1,15 @@
+node.type.*.third_party.rexe:
+  type: mapping
+  label: "Extra settings for nodes"
+  mapping:
+    title_plural:
+      type: string
+      label: "Plural Title"
+    is_site_content:
+      type: boolean
+      label: "Is Site Content"
+    frozen:
+      type: boolean
+      label: "Frozen"
+
+

@@ -1,0 +1,48 @@
+.layout-node-form {
+  margin-bottom: 40px;
+}
+
+.layout-region-node-footer {
+  float: none;
+  width: 100%;
+  padding: 10px 30px 10px 30px;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+
+  background: #e0e0d8;
+
+}
+
+.layout-region-node-footer .layout-region-node-footer__content {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.layout-region-node-footer .form-actions {
+  margin: 0;
+}
+
+.layout-region-node-footer .button,
+.node-form-options .button{
+  border-radius: 2px;
+  padding: 8px 15px;
+
+  font-size: 22px;
+  font-size: 1.2rem;
+}
+
+.layout-node-form .node-form-options {
+  padding: 1em 1.5em;
+  background: white;
+  margin: -1px;
+
+  font-size: 18px;
+  font-size: 1.2rem;
+}
+
+.layout-node-form .node-form-options input[type=checkbox]:checked + label {
+  font-weight: bold;
+}

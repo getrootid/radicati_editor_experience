@@ -1,0 +1,298 @@
+<?php
+
+/**
+ * @file
+ * Contains rexe.module.
+ */
+
+use Drupal\Core\Routing\RouteMatchInterface;
+use \Drupal\Core\Form\FormStateInterface;
+
+/**
+ * Implements hook_help().
+ */
+function rexe_help($route_name, RouteMatchInterface $route_match)
+{
+  switch ($route_name) {
+      // Main module help for the rexe module.
+    case 'help.page.rexe':
+      $output = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+      $output .= '<p>' . t('Module that enhancements the Drupal 8 Editor eXperience.') . '</p>';
+      return $output;
+
+    default:
+  }
+}
+
+
+function rexe_form_alter(&$form, FormStateInterface $form_state) {
+
+  if ($form['#form_id'] == 'node_type_edit_form' || $form['#form_id'] == 'node_type_add_form') {
+
+    $entity = $form_state->getFormObject()->getEntity();
+
+    $position = array_search('name', array_keys($form));
+
+    $f1 = array_slice($form, 0, $position + 2);
+    $f2 = array_slice($form, $position + 2);
+
+    //kint($f2);
+
+    $title_plural = [[
+      '#type' => 'textfield',
+      '#title' => t('Plural Name'),
+      '#description' => t('Used in the admin menu, if blank the name will be used with no pluralization.'),
+      '#default_value' => $entity->getThirdPartySetting('rexe', 'title_plural')
+    ]];
+
+    $form = array_merge($f1, $title_plural, $f2);
+
+    $form['display']['is_site_content'] = [
+      '#type' => 'checkbox',
+      '#title' => t('Site Content'),
+      '#description' => t('When checked, this is treated as primary site content and will show up as a special item in the admin menu'),
+      '#default_value' => $entity->getThirdPartySetting('rexe', 'is_site_content')
+    ];
+
+
+    $form['#entity_builders'][] = 'rexe_form_node_type_edit_form_builder';
+  }
+}
+
+function rexe_form_node_type_edit_form_builder($entity_type, $entity, &$form, FormStateInterface $form_state)
+{
+  if ($form_state->getValue('title_plural')) {
+    $entity->setThirdPartySetting('rexe', 'title_plural', $form_state->getValue('title_plural'));
+  } else {
+    $entity->unsetThirdPartySetting('rexe', 'title_plural');
+  }
+
+  $entity->setThirdPartySetting('rexe', 'is_site_content', $form_state->getValue('is_site_content'));
+}
+
+function rexe_menu_links_discovered_alter(&$links)
+{
+  $types = \Drupal::entityTypeManager()
+    ->getStorage('node_type')
+    ->loadMultiple();
+
+  foreach ($types as $type) {
+    if ($type->getThirdPartySetting('rexe', 'is_site_content')) {
+
+      $label_plural = $type->label();
+
+      if ($type->getThirdPartySetting('rexe', 'title_plural') !== "" && $type->getThirdPartySetting('rexe', 'title_plural') !== null) {
+        $label_plural = $type->getThirdPartySetting('rexe', 'title_plural');
+      }
+
+      $links["radicati.content.{$type->id()}"] = array(
+        'title' => $label_plural,
+        'route_name' => 'system.admin_content',
+        'description' => new \Drupal\Core\StringTranslation\TranslatableMarkup('View content of type :type.', [':type' => $type->label()]),
+        'parent' => 'system.admin',
+        'weight' => -30,
+        'options' => [
+          'query' => [
+            'type' => $type->id(),
+          ],
+          'attributes' => [
+            'class' => [
+              'toolbar-icon',
+              'toolbar-icon-system-admin-content'
+            ]
+          ]
+        ]
+      );
+
+      $links["radicati.content.{$type->id()}.all"] = array(
+        'title' => t("All @label", ['@label' => $label_plural]),
+        'route_name' => 'system.admin_content',
+        'parent' => "radicati.content.{$type->id()}",
+        'weight' => -30,
+        'options' => [
+          'query' => [
+            'type' => $type->id(),
+          ],
+        ],
+        'menu_name' => 'admin',
+        'id' => "radicati.content.{$type->id()}.all"
+      );
+
+      $links["radicati.content.{$type->id()}.add"] = array(
+        'title' => t("Add New"),
+        'route_name' => 'node.add',
+        'route_parameters' => [
+          'node_type' => $type->id()
+        ],
+        'parent' => "radicati.content.{$type->id()}",
+        'weight' => 1,
+        'deriver' => '\Drupal\admin_toolbar_tools\Plugin\Derivative\ExtraLinks',
+        'provider' => 'admin_toolbar_tools',
+        'menu_name' => 'admin',
+        'id' => "radicati.content.{$type->id()}.add"
+      );
+
+      $vocabs = _rexe_get_vocabularies_on_entity_type($type->id());
+
+      foreach ($vocabs as $vocab) {
+        $term = \Drupal::entityTypeManager()->getStorage('taxonomy_vocabulary')->load($vocab);
+
+        $links["radicati.content.{$type->id()}.vocab.{$vocab}"] = [
+          'title' => $term->label(),
+          'route_name' => 'entity.taxonomy_vocabulary.overview_form',
+          'route_parameters' => [
+            'taxonomy_vocabulary' => $vocab
+          ],
+          'parent' => "radicati.content.{$type->id()}",
+          'weight' => 1,
+          'deriver' => '\Drupal\admin_toolbar_tools\Plugin\Derivative\ExtraLinks',
+          'provider' => 'admin_toolbar_tools',
+          'menu_name' => 'admin',
+          'id' => "radicati.content.{$type->id()}.vocab.{$vocab}"
+
+        ];
+      }
+    }
+  }
+}
+
+function _rexe_get_vocabularies_on_entity_type($bundle, $type = 'node')
+{
+  $entityFieldManager = \Drupal::service('entity_field.manager');
+  $fields = $entityFieldManager->getFieldDefinitions($type, $bundle);
+
+  $vocabs = [];
+
+  foreach ($fields as $key => $field) {
+
+    if ($field->getType() == 'entity_reference') {
+      $settings = $field->getSettings();
+
+      if ($settings['target_type'] == 'taxonomy_term') {
+
+
+        $vocabs = array_merge($vocabs, $settings['handler_settings']['target_bundles']);
+      }
+    }
+  }
+
+  return array_unique($vocabs);
+}
+
+///** REMOVED DUE TO SWITCHING TO GIN
+// * Moves most fields into the sidebar (meta/advanced groups).
+// *
+// * @param $form
+// * @param FormStateInterface $form_state
+// * @param $form_id
+// * @return mixed
+// */
+//function rexe_form_node_form_alter(&$form, FormStateInterface $form_state,  $form_id) {
+//  $form['#theme'] = ['node_edit_form'];
+//
+//  // Look for field groups
+//  if(!empty($form['#fieldgroups'])) {
+//
+//    $form['#attributes']['class'][] = 'has-field-group';
+//
+//    // If field groups are set, the first one should be the parent. Add a class to it.
+//    $form['#fieldgroups']->group_content['format_settings']['id'] = "jason";
+//
+//  }
+//
+//
+//  $form['advanced']['#type'] = 'container';
+//  $form['advanced']['#accordion'] = TRUE;
+//  $form['meta']['#type'] = 'container';
+//  $form['meta']['#access'] = TRUE;
+//
+//  $form['revision_information']['#type'] = 'container';
+//  $form['revision_information']['#group'] = 'meta';
+//  $form['revision_information']['#weight'] = 1;
+//
+//  // Move form actions (save button...) to the top of the sidebar
+//  $form['actions']['#type'] = 'container';
+//  $form['actions']['#group'] = 'meta';
+//  $form['actions']['#weight'] = 500;
+//
+//
+//
+//  // Moves the published checkbox to the sidebar with other publishing checkboxes, and puts them on top.
+//  // TODO: Add code to change checkboxes to a checkmark
+//  $form['status']['#group'] = 'meta';
+//  $form['status']['#weight'] = 499;
+//
+//  // Bring promotion options to the top:
+//  $form['options']['#group'] = 'meta';
+//  $form['options']['#weight'] = 510;
+//
+//  $form['langcode']['#group'] = 'advanced';
+//
+//  $form['path']['#group'] = 'advanced';
+//
+//  // Move taxonomy fields to a taxonomy section in the right bar.
+//  // TODO: Make this a configuation option?
+////  $form['taxonomy'] = [
+////    '#type' => 'details',
+////    '#title' => t('Taxonomy'),
+////    '#group' => 'advanced',
+////    '#attributes' => [
+////      'class' => ['node-form-taxonomy']
+////    ],
+////    '#attached' => [
+////      'library' => ['node/drupal.node'],
+////    ],
+////    '#weight' => -80,
+////    '#optional' => TRUE,
+////    '#open' => TRUE,
+////  ];
+//
+////  foreach ($form as $key => $field) {
+////    if (is_array($field) && isset($field['widget']['#field_name'])) {
+////
+////      $is_tax = _rexe_is_taxonomy_field('article', $field['widget']['#field_name']);
+////
+////      if ($is_tax)
+////        $form[$key]['#group'] = 'taxonomy';
+////    }
+////  }
+//
+//  return $form;
+//}
+//
+
+function _rexe_is_taxonomy_field($bundle, $field_name)
+{
+
+  $definitions = \Drupal::service('entity_field.manager')->getFieldDefinitions('node', $bundle);
+
+  if (isset($definitions[$field_name])) {
+    //$options_array = $definitions[$field_name]->getSetting('allowed_values');
+
+    if ($definitions[$field_name]->getType() != 'entity_reference')
+      return false;
+
+    $settings = $definitions[$field_name]->getSettings();
+
+    if (isset($settings['target_type']) && $settings['target_type'] == 'taxonomy_term')
+      return true;
+  }
+
+  return false;
+}
+
+
+/**
+ * Load styles onto all admin pages
+ */
+
+// function radicati_views_addons_preprocess_page(&$variables)
+// {
+//   // From here, you can load styles on *any* page.
+//   // The following code limits it to admin/backend pages
+//   $is_admin = \Drupal::service('router.admin_context')->isAdminRoute();
+//   if ($is_admin) {
+//     $variables['#attached']['library'][] = 'rexe/admin_styles';
+//   }
+// }
